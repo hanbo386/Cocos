@@ -1,0 +1,109 @@
+原文：yehudakatz.com/2011/08/11/understanding-javascript-function-invocation-and-this/
+                                            如何理解Javscript中的函数调用和"this"
+	长期以来，我发现很多人对Javascript的函数调用过程表示迷惑不解，尤其是函数中"this"的含义更让人抓狂。
+	在我看来，当你明白了JS函数调用的核心原语，然后把其他的函数调用方式都看做是在建立在核心原语上的一种“糖衣”，这些困惑基本就能迎刃而解了。事实上，ECMAScript的说明文档也正是采用了相同的策略。在某些方面，这篇文章所表述的就是ECMA文档所描述的一种简化版，但是其基本思想是一致的。
+核心原语
+首先我们来了解下JS的核心函数原语——函数的call方法[1]。call方法的使用方式相对来说还是比较简洁明了的。我们看下如何使用call方法来调用函数：
+1. 创建一个参数列表(argList)，参数个数大于等于1；
+2. 第一个参数作为thisValue
+3. 开始调用函数，将thisValue的值赋值给this。参数表中的其余参数作为函数的调用参数。
+例如：
+function hello(thing){
+	console.log(this + "says hello " + thing);
+}
+hello.call("Yehuda", "world");//输出结果：Yehuda says hello world
+
+如上代码所示，我们调用了hello函数，函数的this值就被指定为Yehuda，还有一个参数”world”作为函数的调用参数。这就是我们所说的Javscript的函数调用核心原语了。我们可以把其他的函数调用的语法形式看作是对核心原语的“去糖衣”。(所谓“去糖衣”就是使用一种更为易于理解的语法和更为基础的原语(.call)来描述函数调用的过程)。
+ [1]在 ESS 文档中，call方法是以另外一种更为底层的原语来描述的。call不过是这个更底层原语的一层非常浅的封装。因此我在这里只是对此做了稍稍的简化。希望了解更多的话，可以看下本文的末尾部分。
+
+简单函数调用
+显然，调用函数的时候每次都使用call方法的话，就比较麻烦。JavaScript允许我们省略掉call和第一个参数，直接使用括号来调用函数。（hello.call(...,"world")->hello("world")）。这种简单形式的函数调用就是“去糖衣”。
+function hello(thing){
+	console.log("Hello" + thing);
+}
+//this:
+hello("world");
+//“去糖衣”:
+hello.call(window, "world");
+不过在ECMAScript 5里面，当使用call调用的这种严格模式，表现会有所不同[2]：
+hello("world");
+hello.call(undefined, "world");
+简单来说就是：一个形如fn(....args)的函数调用形式，与fn.call(window, ....args)的调用形式等效。（在ES5里面，window变成了undefined）需要注意的是，这种等效同样适用于函数内联声明，即(function(){})()等同于(function(){}).call(window)。ES5中window变成了undefined。
+[2]实际上，我还隐藏了一些事实。ECMAScript 5文档中说的是：在大多数情况下，传递给this的thisValue的值是undefined。而当处于非严格模式下，thisVaule依然是全局对象。这种做法可以避免严格模式下的调用者破坏非严格模式库。
+
+成员函数的调用
+接下来我们看一下一种非常普遍的函数调用方式：方法作为对象的一个属性成员来被调用。
+我们来看下怎么“去糖衣”：
+var person = {
+	name : "Brendan Eich",
+	hello : function(thing){
+		console.log(this + " says hello " + thing);
+	}
+}
+//this:
+person.helllo("world");
+//“去糖衣”:
+person.hello.call(person, "world");
+注意，hello方法以什么样的方式添加为对象的属性，其实是无关紧要的。我们之前定义了一个独立的函数hello。看下，如果使用动态方式为对象添加成员函数会怎么样：
+function hello(thing){
+	console.log(this + " says hello " + thing);
+}
+person = {name : "Brendan Eich"};
+person.hello = hello;
+person.hello("world");//仍然等同于 person.hello.call(person, "world")
+hello("world");//输出："[object window] says hello world"
+注意，函数并不具有一个固定的"this"的概念。函数只有在调用时this的值才会被确定下来，this值的确定依赖于调用者是以何种方式调用函数的。
+
+使用Function.prototype.bind:
+有时候让函数具有一个固定的this值会比较方便，因此有人使用以下的技巧对函数进行转换，使其this固定下来：
+var person = {
+	name : "Brendan Eich",
+	hello : function(thing){
+		console.log(this.name + " says hello " + thing);
+	}
+}
+var boundHello = function(thing){
+	return person.hello.call(person, thing);
+}
+boundHello("world");
+尽管boundHello调用也可以写成boundHello.call(window,"world")，我们把.call的调用封装到函数内部，把this设置成了我们想要的那个值，从函数外部看起来依然是普通调用的形式。
+我们还可以通过几次转换把刚刚的那个小技巧变成一种通用的方法。
+var bind = function(func, thisValue){
+	return function(){
+		return func.apply(thisValue, arguments);
+	}
+}
+var boundHello = bind(person.hello, person);
+boundHello("world");//输出："Brendan Eich says hello world"
+要理解上面的代码，你需要知道以下两点：
+1. arguments是一个传递给函数的类似于数组的对象。
+2. apply方法和call原语作用是一样的，只不过apply方法接受的是一个类数组的对象作为参数，参数被放到这个数组中进行传递，而call接受的是一个个独立分列出来的参数。
+bind这个方法的作用仅仅是返回了一个新的函数。当新函数被调用的时候，它做的事情是把原始方法和person对象进行了绑定，这样person对象就被设定成了原始方法的this，然后调用原始方法。
+上面这个函数属于一种常用的方法，ES5因此特意提供了这样一个bind函数，用于完成上面的工作。
+var boundHello = person.hello.bind(person);
+boundHello("world");
+当你需要把一个原始方法作为回调函数进行传递时，bind的函数非常有用。
+var person = {
+	name : "Alex Russell",
+	hello : function(){
+		console.log(this.name + " says hello world");
+	}
+}
+$('#some-div').click(person.hello.bind(person));
+//当div被点击时，页面就会显示"Alex Russell says hello world"
+当然，采用上述方法还是显得有些笨拙。TC39（正在制定下一个版本ECMASCript的委员会）正在致力于推出一种更加优雅且具有向后兼容性的解决方案。
+
+聊聊jQuery
+由于jQuery里面大量使用匿名回调函数，它在其内部使用call方法来把回调函数里的this值设置为更有用的值。例如，jQuery把事件处理器作为调用call的第一个参数来为this赋值，而不是使用默认的window对象。这种做法是极好的，因为this的默认值对于匿名函数来说并没有什么卵用。但是这种做法也给初学者们带来了一定的困惑，让他们误以为this是个总是变来变去、让人难以索解的家伙。但是如果你真的理解了如何把糖衣包裹下的函数剥离成func.call(thisValue, ...args)的基本方法，那么你就不会迷失在this诡异莫辨的汪洋大海中了。
+
+最后解释下一之前说的关于call原语的问题
+在上文中，我对ECMA文档中的部分精确表述做了简化。其中最重要的简化就是我把func.call称为原语。
+实际上ECMA文档中，真正的原语是[[call]]，它是一个内部方法，func.call和[obj.]func()都用到了它。看一下func.call这个方法的定义：
+1. 如果IsCallable(func)的值是false的话，就抛出一个TypeError异常；（说明该对象不是一个可以执行的函数）
+2. 将argList列表置空；
+3. 如果调用该方法传递的参数超过一个的话，那么从左到右取参数，并把取得的参数依次添加到argList列表；
+4. 将thisArg赋值给this，其余参数作为调用func的参数，调用func的内部方法[[Call]]并将结果返回；
+如你所见，上述定义本质上是一个非常简单的使用[[Call]]原语的JavaScript定义。你可以回头看下文档里关于函数调用的定义，你会发现开始的七个步骤设置了thisValue的值和argList的值。最后一步是：将thisValue赋值给this， argList列表的值设为参数值，然后将func调用内部方法[[Call]]的结果返回。一旦argList和thisValue的值确定后，二者执行的就是完全相同的操作了。
+我把call称为原语略有偷懒的嫌疑，但是它的本质含义跟我从文档中节选的内容以及引用的章节是一致的。同时还有一部分补充案例本文没有涉及到（主要是讲with的用法的）
+
+
